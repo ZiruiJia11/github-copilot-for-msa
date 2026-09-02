@@ -446,17 +446,18 @@ export default function App() {
                         </span>
                       </td>
                       <td>
-                        {applications.some(
-                          (application) => application.listingId === listing.id,
-                        ) ? (
-                          <span className="application-status">
-                            {applications.find(
-                              (application) => application.listingId === listing.id,
-                            )?.status ?? "Applied"}
-                          </span>
-                        ) : (
-                          <span className="not-applied">Not applied</span>
-                        )}
+                        {(() => {
+                          const application = applications.find(
+                            (application) => application.listingId === listing.id,
+                          );
+                          return application ? (
+                            <span className="application-status">
+                              {application.status}
+                            </span>
+                          ) : (
+                            <span className="not-applied">Not applied</span>
+                          );
+                        })()}
                       </td>
                       <td>
                         <a
