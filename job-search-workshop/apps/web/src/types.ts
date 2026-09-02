@@ -32,3 +32,37 @@ export interface CollectionRun {
   skippedCount: number;
   failureCount: number;
 }
+
+export interface Application {
+  id: string;
+  listingId: string | null;
+  jobTitle: string;
+  companyName: string;
+  jobDescription: string;
+  sourceUrl: string;
+  status: ApplicationStatus;
+  appliedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  documents: ApplicationDocument[];
+}
+
+export interface ApplicationDocument {
+  id: string;
+  applicationId: string;
+  type: "cv" | "coverLetter";
+  fileName: string;
+  contentType: string;
+  createdAt: string;
+}
+
+export type ApplicationStatus =
+  | "Applied"
+  | "Screening"
+  | "Interview"
+  | "Take-home"
+  | "Final"
+  | "Offer"
+  | "Rejected"
+  | "Withdrawn"
+  | "No Response";

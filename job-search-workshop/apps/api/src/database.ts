@@ -1,10 +1,13 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
 import type {
+  Application,
+  ApplicationStatus,
+  ApplicationDocument,
   CollectionRun,
   Listing,
   ListingFilters,
@@ -16,11 +19,14 @@ type SqlValue = string | number | null;
 
 export class JobFinderRepository {
   private readonly database: Database.Database;
+  private readonly documentsDirectory: string;
 
   public constructor(databasePath: string) {
     if (databasePath !== ":memory:") {
       mkdirSync(dirname(databasePath), { recursive: true });
     }
+    this.documentsDirectory = `${databasePath === ":memory:" ? "." : dirname(databasePath)}${"/documents"}`;
+    mkdirSync(this.documentsDirectory, { recursive: true });
 
     this.database = new Database(databasePath);
     this.database.pragma("journal_mode = WAL");
@@ -152,6 +158,156 @@ export class JobFinderRepository {
     return run;
   }
 
+  public createApplication(input: {
+    listingId: string | null;
+    jobTitle: string;
+    companyName: string;
+    jobDescription: string;
+    sourceUrl: string;
+    status: ApplicationStatus;
+    appliedAt: string;
+  }): Application {
+    const application: Application = {
+      id: crypto.randomUUID(),
+      ...input,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      documents: [],
+    };
+
+    this.database
+      .prepare(
+        `INSERT INTO applications
+           (id, listing_id, job_title, company_name, job_description, source_url,
+            status, applied_at, created_at, updated_at)
+         VALUES
+           (@id, @listingId, @jobTitle, @companyName, @jobDescription, @sourceUrl,
+            @status, @appliedAt, @createdAt, @updatedAt)`,
+      )
+      .run(application);
+
+    return application;
+  }
+
+  public listApplications(): Application[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, listing_id, job_title, company_name, job_description, source_url,
+          status, applied_at, created_at, updated_at
+         FROM applications
+         ORDER BY applied_at DESC, created_at DESC`,
+      )
+      .all() as Array<Record<string, SqlValue>>;
+
+    return rows.map((row) => ({
+      id: String(row.id),
+      listingId: row.listing_id === null ? null : String(row.listing_id),
+      jobTitle: String(row.job_title),
+      companyName: String(row.company_name),
+      jobDescription: String(row.job_description),
+      sourceUrl: String(row.source_url),
+      status: String(row.status) as ApplicationStatus,
+      appliedAt: String(row.applied_at),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+      documents: this.listApplicationDocuments(String(row.id)),
+    }));
+  }
+
+  public saveApplicationDocument(input: {
+    applicationId: string;
+    type: ApplicationDocument["type"];
+    fileName: string;
+    contentType: string;
+    data: Buffer;
+  }): ApplicationDocument {
+    const previous = this.database
+      .prepare("SELECT storage_path FROM application_documents WHERE application_id = ? AND type = ?")
+      .get(input.applicationId, input.type) as { storage_path?: string } | undefined;
+    if (previous?.storage_path) {
+      try {
+        unlinkSync(previous.storage_path);
+      } catch {
+        // The database record is still replaced if an old file is already gone.
+      }
+    }
+
+    const id = crypto.randomUUID();
+    const storagePath = `${this.documentsDirectory}/${id}`;
+    writeFileSync(storagePath, input.data, { flag: "wx" });
+    const document: ApplicationDocument = {
+      id,
+      applicationId: input.applicationId,
+      type: input.type,
+      fileName: input.fileName,
+      contentType: input.contentType,
+      createdAt: new Date().toISOString(),
+    };
+    this.database.transaction(() => {
+      this.database
+        .prepare("DELETE FROM application_documents WHERE application_id = ? AND type = ?")
+        .run(input.applicationId, input.type);
+      this.database
+        .prepare(
+          `INSERT INTO application_documents
+             (id, application_id, type, file_name, content_type, storage_path, created_at)
+           VALUES (@id, @applicationId, @type, @fileName, @contentType, @storagePath, @createdAt)`,
+        )
+        .run({ ...document, storagePath });
+    })();
+    return document;
+  }
+
+  public listApplicationDocuments(applicationId: string): ApplicationDocument[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, application_id, type, file_name, content_type, created_at
+         FROM application_documents WHERE application_id = ? ORDER BY type`,
+      )
+      .all(applicationId) as Array<Record<string, SqlValue>>;
+    return rows.map((row) => ({
+      id: String(row.id),
+      applicationId: String(row.application_id),
+      type: String(row.type) as ApplicationDocument["type"],
+      fileName: String(row.file_name),
+      contentType: String(row.content_type),
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  public updateApplication(
+    id: string,
+    input: Pick<
+      Application,
+      | "jobTitle"
+      | "companyName"
+      | "jobDescription"
+      | "sourceUrl"
+      | "status"
+      | "appliedAt"
+    >,
+  ): Application | null {
+    const updatedAt = new Date().toISOString();
+    const result = this.database
+      .prepare(
+        `UPDATE applications
+         SET job_title = @jobTitle,
+             company_name = @companyName,
+             job_description = @jobDescription,
+             source_url = @sourceUrl,
+             status = @status,
+             applied_at = @appliedAt,
+             updated_at = @updatedAt
+         WHERE id = @id`,
+      )
+      .run({ id, ...input, updatedAt });
+
+    return result.changes === 0
+      ? null
+      : this.listApplications().find((application) => application.id === id) ??
+          null;
+  }
+
   public completeCollectionRun(
     id: string,
     status: CollectionRun["status"],
@@ -261,7 +417,40 @@ export class JobFinderRepository {
         completed_at TEXT NOT NULL,
         PRIMARY KEY (run_id, source_id)
       );
+
+      CREATE TABLE IF NOT EXISTS applications (
+        id TEXT PRIMARY KEY,
+        listing_id TEXT REFERENCES listings(id),
+        job_title TEXT NOT NULL,
+        company_name TEXT NOT NULL,
+        job_description TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Applied',
+        applied_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS application_documents (
+        id TEXT PRIMARY KEY,
+        application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN ('cv', 'coverLetter')),
+        file_name TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        storage_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (application_id, type)
+      );
     `);
+
+    const applicationColumns = this.database
+      .prepare("PRAGMA table_info(applications)")
+      .all() as Array<{ name: string }>;
+    if (!applicationColumns.some((column) => column.name === "status")) {
+      this.database.exec(
+        "ALTER TABLE applications ADD COLUMN status TEXT NOT NULL DEFAULT 'Applied'",
+      );
+    }
   }
 
   private seedSources(): void {

@@ -21,27 +21,30 @@ describe("job finder API", () => {
     await request(app).get("/api/health").expect(200, { status: "ok" });
     const response = await request(app).get("/api/sources").expect(200);
 
-    expect(response.body.sources).toHaveLength(6);
+    expect(response.body.sources).toHaveLength(8);
     expect(
-      response.body.sources.every(
-        (source: { enabled: boolean }) => source.enabled,
-      ),
-    ).toBe(true);
+      response.body.sources.filter((source: { enabled: boolean }) => source.enabled),
+    ).toHaveLength(2);
+    expect(
+      response.body.sources
+        .filter((source: { enabled: boolean }) => source.enabled)
+        .map((source: { id: string }) => source.id),
+    ).toEqual(["pushpay", "serko"]);
   });
 
   it("starts a background collection run", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          [
-            '<a href="https://careers.xero.com/jobs/f864bae7-8238-4123-9251-24d2e7fd63da/software-engineer/">Software Engineer</a>',
-            '<span>US: Remote, Washington, United States</span>',
-            '<a href="https://careers.xero.com/jobs/40a09a30-ab3b-4d65-af9b-728b8da13907/customer-incident-manager/">Customer Incident Manager</a>',
-            '<span>Parnell, Auckland, New Zealand</span>',
-            '<a href="https://www.serko.com/job-listing/principal-engineer-serkoai-auckland-new-zealand"><span>Principal Engineer - Serko.ai</span><span>Auckland, New Zealand</span></a>',
-            '<a href="https://www.serko.com/job-listing/principal-engineer-ai-platform-operations-seattle-united-states">Principal Engineer - AI Platform &amp; Operations Seattle, Washington, United States Full-time</a>',
-          ].join(""),
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            [
+              '<a href="https://job-boards.greenhouse.io/pushpay/jobs/7733604">Senior Software Engineer (C#.NET)</a>',
+              '<a href="https://job-boards.greenhouse.io/pushpay/jobs/7733621">Senior Software Engineer (Front-End)</a>',
+              '<a href="https://www.serko.com/job-listing/principal-engineer-serkoai-auckland-new-zealand"><span>Principal Engineer - Serko.ai</span><span>Auckland, New Zealand</span></a>',
+              '<a href="https://www.serko.com/job-listing/principal-engineer-ai-platform-operations-seattle-united-states">Principal Engineer - AI Platform &amp; Operations Seattle, Washington, United States Full-time</a>',
+            ].join(""),
+          ),
         ),
       ),
     );
@@ -60,25 +63,26 @@ describe("job finder API", () => {
 
     expect(latestResponse.body.run).toMatchObject({
       status: "completed",
-      sourceCount: 6,
-      successCount: 6,
+      sourceCount: 2,
+      successCount: 2,
       skippedCount: 0,
     });
 
     const listingsResponse = await request(app).get("/api/listings").expect(200);
-    expect(listingsResponse.body.listings).toHaveLength(2);
-    expect(listingsResponse.body.listings).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        title: "Customer Incident Manager",
-        location: "Parnell, Auckland, New Zealand",
-        sourceId: "xero",
-      }),
-      expect.objectContaining({
-        title: "Principal Engineer - Serko.ai",
-        location: "Auckland, New Zealand",
-        sourceId: "serko",
-      }),
-    ]));
+    expect(listingsResponse.body.listings).toHaveLength(3);
+    expect(listingsResponse.body.listings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "Senior Software Engineer (C#.NET)",
+          sourceId: "pushpay",
+        }),
+        expect.objectContaining({
+          title: "Principal Engineer - Serko.ai",
+          location: "Auckland, New Zealand",
+          sourceId: "serko",
+        }),
+      ]),
+    );
   });
 
   it("returns an empty listing collection before a source is enabled", async () => {
@@ -86,6 +90,63 @@ describe("job finder API", () => {
 
     await request(app).get("/api/listings?search=engineer").expect(200, {
       listings: [],
+    });
+  });
+
+  it("creates an application only with the required job details", async () => {
+    const app = createApp(repository);
+
+    await request(app)
+      .post("/api/applications")
+      .send({ jobTitle: "Software Engineer" })
+      .expect(400);
+
+    const response = await request(app)
+      .post("/api/applications")
+      .send({
+        jobTitle: "Software Engineer",
+        companyName: "Example Company",
+        jobDescription: "Build useful software.",
+        sourceUrl: "https://example.com/jobs/1",
+        appliedAt: "2026-09-03T10:00:00.000Z",
+      })
+      .expect(201);
+
+    expect(response.body.application).toMatchObject({
+      listingId: null,
+      jobTitle: "Software Engineer",
+      companyName: "Example Company",
+      jobDescription: "Build useful software.",
+      sourceUrl: "https://example.com/jobs/1",
+      appliedAt: "2026-09-03T10:00:00.000Z",
+    });
+
+    const applicationsResponse = await request(app)
+      .get("/api/applications")
+      .expect(200);
+    expect(applicationsResponse.body.applications).toEqual([
+      expect.objectContaining({
+        jobTitle: "Software Engineer",
+        companyName: "Example Company",
+        jobDescription: "Build useful software.",
+      }),
+    ]);
+
+    const updateResponse = await request(app)
+      .patch(`/api/applications/${response.body.application.id}`)
+      .send({
+        jobTitle: "Software Engineer",
+        companyName: "Example Company",
+        jobDescription: "Updated role requirements.",
+        sourceUrl: "https://example.com/jobs/1",
+        status: "Interview",
+        appliedAt: "2026-09-04T10:00:00.000Z",
+      })
+      .expect(200);
+    expect(updateResponse.body.application).toMatchObject({
+      jobDescription: "Updated role requirements.",
+      status: "Interview",
+      appliedAt: "2026-09-04T10:00:00.000Z",
     });
   });
 });
