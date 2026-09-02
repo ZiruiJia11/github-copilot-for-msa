@@ -357,6 +357,23 @@ th {
   text-transform: uppercase;
 }
 
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sort-button:hover {
+  color: var(--teal);
+}
+
 td {
   font-size: 0.9rem;
 }

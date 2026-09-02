@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CircleAlert,
   ExternalLink,
   MapPin,
@@ -9,6 +12,15 @@ import {
 
 import { getLatestRun, getListings, startCollection } from "./api";
 import type { CollectionRun, Listing } from "./types";
+
+type SortKey = "title" | "companyName" | "location";
+type SortDirection = "asc" | "desc";
+
+const columns: { key: SortKey; label: string }[] = [
+  { key: "title", label: "Role" },
+  { key: "companyName", label: "Company" },
+  { key: "location", label: "Location" },
+];
 
 function formatTimestamp(value: string | null): string {
   if (!value) {
@@ -28,6 +40,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
   useEffect(() => {
     let active = true;
@@ -98,6 +112,25 @@ export default function App() {
       setCollecting(false);
     }
   }
+
+  function handleSort(key: SortKey): void {
+    if (sortKey === key) {
+      setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection("asc");
+    }
+  }
+
+  const sortedListings = useMemo(() => {
+    if (!sortKey) return listings;
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...listings].sort((a, b) => {
+      const aValue = a[sortKey] ?? "";
+      const bValue = b[sortKey] ?? "";
+      return aValue.localeCompare(bValue) * direction;
+    });
+  }, [listings, sortKey, sortDirection]);
 
   async function handleSearch(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -191,14 +224,31 @@ export default function App() {
               <table>
                 <thead>
                   <tr>
-                    <th>Role</th>
-                    <th>Company</th>
-                    <th>Location</th>
-                    <th aria-label="Open source" />
+                    {columns.map((column) => (
+                      <th key={column.key}>
+                        <button
+                          className="sort-button"
+                          onClick={() => handleSort(column.key)}
+                          type="button"
+                        >
+                          {column.label}
+                          {sortKey === column.key ? (
+                            sortDirection === "asc" ? (
+                              <ArrowUp size={14} aria-hidden="true" />
+                            ) : (
+                              <ArrowDown size={14} aria-hidden="true" />
+                            )
+                          ) : (
+                            <ArrowUpDown size={14} aria-hidden="true" />
+                          )}
+                        </button>
+                      </th>
+                    ))}
+                    <th>LINK</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {listings.map((listing) => (
+                  {sortedListings.map((listing) => (
                     <tr
                       className={selectedListing?.id === listing.id ? "selected" : ""}
                       key={listing.id}
