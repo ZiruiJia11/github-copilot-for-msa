@@ -87,6 +87,7 @@ describe("App", () => {
       "Application saved.",
     );
     expect(screen.getByText("Applied")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Applications (1)" }));
     await user.click(screen.getByRole("button", { name: "View JD" }));
     expect(screen.getByText("Build software for customers.")).toBeVisible();
     expect(fetchMock).toHaveBeenLastCalledWith(
@@ -137,9 +138,53 @@ describe("App", () => {
 
     await user.click((await screen.findAllByText("Software Engineer"))[0]);
     expect(screen.getByText("Application status: Applied")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Applications (1)" }));
     await user.click(screen.getByRole("button", { name: "Edit application" }));
     expect(screen.getByLabelText("Job description")).toHaveValue(
       "Previously saved JD.",
     );
+  });
+
+  it("hides applied jobs when the filter is enabled", async () => {
+    const user = userEvent.setup();
+    const listing = {
+      id: "listing-1",
+      sourceId: "serko",
+      companyName: "Serko",
+      title: "Software Engineer",
+      location: "Auckland, New Zealand",
+      summary: null,
+      postedAt: null,
+      sourceUrl: "https://example.com/jobs/1",
+      firstSeenAt: "2026-09-03T10:00:00.000Z",
+      lastSeenAt: "2026-09-03T10:00:00.000Z",
+      status: "active",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ listings: [listing] }))
+      .mockResolvedValueOnce(jsonResponse({ run: null }))
+      .mockResolvedValueOnce(jsonResponse({ applications: [{
+        id: "application-1",
+        listingId: "listing-1",
+        jobTitle: "Software Engineer",
+        companyName: "Serko",
+        jobDescription: "Saved JD.",
+        sourceUrl: "https://example.com/jobs/1",
+        status: "Applied",
+        appliedAt: "2026-09-03T10:00:00.000Z",
+        createdAt: "2026-09-03T10:00:00.000Z",
+        updatedAt: "2026-09-03T10:00:00.000Z",
+        documents: [],
+      }]}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("Software Engineer")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Hide applied" }));
+    expect(screen.queryByText("Software Engineer")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show applied" }));
+    expect(screen.getByText("Software Engineer")).toBeVisible();
   });
 });

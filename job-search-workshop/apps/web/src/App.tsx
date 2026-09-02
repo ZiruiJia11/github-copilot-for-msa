@@ -5,6 +5,7 @@ import {
   ArrowUpDown,
   CircleAlert,
   ExternalLink,
+  Filter,
   MapPin,
   RefreshCw,
   Search,
@@ -40,6 +41,7 @@ const APPLICATION_STATUSES: ApplicationStatus[] = [
 
 type SortKey = "title" | "companyName" | "location";
 type SortDirection = "asc" | "desc";
+type Page = "search" | "applications";
 
 const columns: { key: SortKey; label: string }[] = [
   { key: "title", label: "Role" },
@@ -85,6 +87,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState<Page>("search");
+  const [hideApplied, setHideApplied] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
@@ -168,15 +172,28 @@ export default function App() {
     }
   }
 
+  const visibleListings = useMemo(
+    () =>
+      hideApplied
+        ? listings.filter(
+            (listing) =>
+              !applications.some(
+                (application) => application.listingId === listing.id,
+              ),
+          )
+        : listings,
+    [applications, hideApplied, listings],
+  );
+
   const sortedListings = useMemo(() => {
-    if (!sortKey) return listings;
+    if (!sortKey) return visibleListings;
     const direction = sortDirection === "asc" ? 1 : -1;
-    return [...listings].sort((a, b) => {
+    return [...visibleListings].sort((a, b) => {
       const aValue = a[sortKey] ?? "";
       const bValue = b[sortKey] ?? "";
       return aValue.localeCompare(bValue) * direction;
     });
-  }, [listings, sortKey, sortDirection]);
+  }, [sortKey, sortDirection, visibleListings]);
 
   async function handleSearch(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -290,6 +307,22 @@ export default function App() {
             <h1>Job Finder</h1>
           </div>
           <div className="refresh-control">
+            <nav className="page-switcher" aria-label="Main pages">
+              <button
+                className={activePage === "search" ? "active" : ""}
+                onClick={() => setActivePage("search")}
+                type="button"
+              >
+                Job Search
+              </button>
+              <button
+                className={activePage === "applications" ? "active" : ""}
+                onClick={() => setActivePage("applications")}
+                type="button"
+              >
+                Applications ({applications.length})
+              </button>
+            </nav>
             <span className="refresh-timestamp">
               Last refreshed {formatTimestamp(run?.completedAt ?? null)}
             </span>
@@ -318,6 +351,8 @@ export default function App() {
           </div>
         )}
 
+        {activePage === "search" && (
+          <>
         <section className="listings-section">
           <div className="section-toolbar">
             <div>
@@ -340,6 +375,15 @@ export default function App() {
                 value={search}
               />
               <button type="submit">Search</button>
+              <button
+                aria-pressed={hideApplied}
+                className={`filter-action${hideApplied ? " active" : ""}`}
+                onClick={() => setHideApplied((hidden) => !hidden)}
+                type="button"
+              >
+                <Filter size={16} aria-hidden="true" />
+                {hideApplied ? "Show applied" : "Hide applied"}
+              </button>
             </form>
           </div>
 
@@ -380,14 +424,8 @@ export default function App() {
                         </button>
                       </th>
                     ))}
-                    <th>LINK</th>
-=======
-                    <th>Role</th>
-                    <th>Company</th>
-                    <th>Location</th>
                     <th>Application</th>
-                    <th aria-label="Open source" />
->>>>>>> Stashed changes
+                    <th>Link</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -395,8 +433,14 @@ export default function App() {
                     <tr
                       className={selectedListing?.id === listing.id ? "selected" : ""}
                       key={listing.id}
+                      onClick={() => setSelectedListing(listing)}
+                    >
+                      <td>
+                        <strong>{listing.title}</strong>
+                      </td>
                       <td>{listing.companyName}</td>
-                    <th>Link</th>
+                      <td>
+                        <span className="location">
                           <MapPin size={14} aria-hidden="true" />
                           {listing.location ?? "Not provided"}
                         </span>
@@ -407,8 +451,7 @@ export default function App() {
                         ) ? (
                           <span className="application-status">
                             {applications.find(
-                              (application) =>
-                                application.listingId === listing.id,
+                              (application) => application.listingId === listing.id,
                             )?.status ?? "Applied"}
                           </span>
                         ) : (
@@ -473,6 +516,11 @@ export default function App() {
           </section>
         )}
 
+          </>
+        )}
+
+        {activePage === "applications" && (
+          <>
         <section className="applications-section" aria-labelledby="applications-title">
           <div className="section-toolbar">
             <div>
@@ -550,6 +598,9 @@ export default function App() {
               Open original listing <ExternalLink size={16} aria-hidden="true" />
             </a>
           </section>
+        )}
+
+          </>
         )}
 
         {applicationOpen && selectedListing && (
